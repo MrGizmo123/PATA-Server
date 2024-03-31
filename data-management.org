@@ -121,3 +121,6 @@ beginning which indicates the teachers name"
 #+end_example
 
 
+* Student Lookup
+This is the part which will construct, store, retrieve, query and
+update a trie data structure containing the students names
