@@ -57,32 +57,32 @@
 ;; 		(if (caddr credentials) "true" "false")))))   ;json format
 
 
-(hunchentoot:define-easy-handler (get-schedule :uri "/getSchedule") (user pass scope)
-  (setf (hunchentoot:content-type*) "text/plain")
-  (let ((credentials (attempt-login user pass))
-	(split-scope (split-sequence:split-sequence #\, scope))) ;splits the input at commas
-    (if (caddr credentials)		;only faculty will have id
-	(format nil
-		(cl-json:encode-json-alist-to-string
-		 (query-timetable (cons (caddr credentials) split-scope)
-				  *timetable*)))
-	(format nil "no schedule found"))))
+;; (hunchentoot:define-easy-handler (get-schedule :uri "/getSchedule") (user pass scope)
+;;   (setf (hunchentoot:content-type*) "text/plain")
+;;   (let ((credentials (attempt-login user pass))
+;; 	(split-scope (split-sequence:split-sequence #\, scope))) ;splits the input at commas
+;;     (if (caddr credentials)		;only faculty will have id
+;; 	(format nil
+;; 		(cl-json:encode-json-alist-to-string
+;; 		 (query-timetable (cons (caddr credentials) split-scope)
+;; 				  *timetable*)))
+;; 	(format nil "no schedule found"))))
 
-(defun hash-string (string)
-  "returns the SHA256 hash of STRING as a string"
-  (ironclad:byte-array-to-hex-string
-   (ironclad:digest-sequence :sha256
-			     (flexi-streams:string-to-octets string))))
+;; (defun hash-string (string)
+;;   "returns the SHA256 hash of STRING as a string"
+;;   (ironclad:byte-array-to-hex-string
+;;    (ironclad:digest-sequence :sha256
+;; 			     (flexi-streams:string-to-octets string))))
 
-(defun add-login (user pass &key (faculty nil) (id nil))
-  "hashes and stores the password in the login file"
-  (with-open-file (stream (concatenate 'string path "logins")
-			  :direction :output
-			  :if-exists :append
-			  :if-does-not-exist :create)
-    (let ((pass-hash (hash-string pass)))
-      (if faculty
-	  (format stream "~a,~a,~a~%" user pass-hash id)
-	  (format stream "~a,~a~%" user pass-hash)))))
+;; (defun add-login (user pass &key (faculty nil) (id nil))
+;;   "hashes and stores the password in the login file"
+;;   (with-open-file (stream (concatenate 'string path "logins")
+;; 			  :direction :output
+;; 			  :if-exists :append
+;; 			  :if-does-not-exist :create)
+;;     (let ((pass-hash (hash-string pass)))
+;;       (if faculty
+;; 	  (format stream "~a,~a,~a~%" user pass-hash id)
+;; 	  (format stream "~a,~a~%" user pass-hash)))))
 
 ;(hunchentoot:start *server*)

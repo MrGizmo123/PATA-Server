@@ -1,5 +1,42 @@
+#+title: PATA Database
+#+author: Hrushikesh Patwardhan
 
-* Timetable Test
+* What is it?
+It is where the collection of functions relating to data storage of
+the PICT Attendance Tracker App.
+
+* Login Database
+
+The Hash string function takes a string and returns the string
+representation of the SHA256 hash of the input
+
+#+begin_src lisp
+(defun hash-string (string)
+  "returns the SHA256 hash of STRING as a string"
+  (ironclad:byte-array-to-hex-string
+   (ironclad:digest-sequence :sha256
+			     (flexi-streams:string-to-octets string))))
+
+#+end_src
+
+The ~add-login~ function takes a 
+
+#+begin_src lisp
+
+(defun add-login (user pass &key (faculty nil) (id nil))
+  "hashes and stores the password in the login file"
+  (with-open-file (stream (concatenate 'string path "logins")
+			  :direction :output
+			  :if-exists :append
+			  :if-does-not-exist :create)
+    (let ((pass-hash (hash-string pass)))
+      (if faculty
+	  (format stream "~a,~a,~a~%" user pass-hash id)
+	  (format stream "~a,~a~%" user pass-hash)))))
+#+end_src
+
+
+* Timetable Database
 
 #+name: KDK-timetable
 |  Time | Mon | Tue  | Wed  | Thu | Fri  | Sat |
