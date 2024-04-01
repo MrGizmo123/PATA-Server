@@ -1,0 +1,102 @@
+#+title: PATA Server
+#+author: Hrushikesh Patwardhan
+
+* What is it?
+This is the backend of the PICT Attendance Tracker App (PATA). It will
+handle data management and run an http server that provides the
+information to the app.
+
+* Dependencies
+This server is written in Common Lisp (SBCL). It depends on the
+following libraries:
++ ~hunchentoot~ A simple http server
++ ~ironclad~ An encryption library used to hash the passwords
++ ~flexi-streams~ A library to make handling SHA256 digests easy
++ ~cl-csv~ To read from and write to csv files
++ ~cl-json~ To convert Lisp objects into json format to send it to the
+  app
+
+The ~quicklisp~ package management system is used to load these
+libraries
+
+#+begin_src lisp
+(ql:quickload :hunchentoot)
+(ql:quickload "ironclad")
+(ql:quickload :flexi-streams)
+(ql:quickload :cl-csv)
+(ql:quickload :cl-json)
+#+end_src
+
+* Handlers
+These are basically functions which are bound to addresses on the
+server. For example,
++ The address ~<server-addr>/login~ will be bound to the function
+  ~(login user pass)~.
++ When a ~GET~ request is made to the address ~<server-addr>/login~,
+  this function will be called.
++ The arguments ~user~ and ~pass~ will be bound to the query
+  parameters of the url
++ Consider that a ~GET~ request is made with the url:
+  ~<server-addr>/login?user=acbd&pass=1234~, the function ~(login)~
+  will be called with the parameters ~user = "abcd"~, ~pass =
+  1234~. Like so ~(login "abcd" "1234")~
++ The standard output ~(format nil <output>)~ of this function is then
+  returned as the body of the response from the server.
+  
+** Upload Attendance
+This handles the upload attendance request.
++ The parameter ~absent~ is a comma separated list of the
++ It is bound to the path ~<server-addr>/uploadAttendance~
++ Right now it simply writes the attendance to the file ~attendance~
+
+#+begin_src lisp
+(hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (absent)
+  (setf (hunchentoot:content-type*) "text/plain")
+  (with-open-file (stream (concatenate 'string path "attendance")
+			  :direction :output
+			  :if-exists :append
+			  :if-does-not-exist :create)
+    (format stream "[~a]:~a~%" (timestamp) absent))
+  (format nil "done"))
+#+end_src
+
+** Login
+This handles the login request
+
++ The function ~attempt-login~ checks the ~logins~ file to see if
+  there is an entry corresponding to the input ~user~ and ~pass~
++ ~pass~ is of course the hash of the password, not the actual password
++ The ~login~ file is a csv file, it is currently formatted like so
+  + Each entry has 3 parts, comma separated: ~<Name>, <Password-Hash>, <Abbreviation>
+  + When parsed by ~cl-csv~, it returns a list of lists containing,
+    the entries for example are like this:
+    ~(("Student1" ""))~
+
+#+begin_src lisp
+(defun attempt-login (user pass)
+  "Checks the credentials and returns the entry of fields as a
+list."
+  (let ((result))
+    (loop for cred in (cl-csv:read-csv #P"logins")
+	do (print (car cred))
+	do (print (cadr cred))
+	do (if (and (string= (cadr cred) pass) (string= (car cred) user))    
+	       (setf result cred)))
+    result))
+#+end_src
+
++ This is the actual server handler
++ It is bound to the address ~<server-addr>/login~
++ It returns 
+
+#+begin_src lisp
+(hunchentoot:define-easy-handler (login :uri "/login") (user pass)
+  (setf (hunchentoot:content-type*) "text/plain")
+  (let ((credentials (attempt-login user pass)))
+    (if credentials
+	(format nil "{ \"status\": \"success\", \"isFaculty\": ~a, \"id\": \"~a\" }"
+		(if (caddr credentials) "true" "false")
+		(caddr credentials)) ;json format
+	(format nil "{ \"status\": \"failure\", \"isFaculty\": ~a, \"id\": \"\" }"
+		(if (caddr credentials) "true" "false")))))   ;json format
+#+end_src

@@ -26,35 +26,35 @@
 
 (defvar *server* (make-instance 'hunchentoot:easy-acceptor :port 4242))
 
-(hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (absent)
-  (setf (hunchentoot:content-type*) "text/plain")
-  (with-open-file (stream (concatenate 'string path "attendance")
-			  :direction :output
-			  :if-exists :append
-			  :if-does-not-exist :create)
-    (format stream "[~a]:~a~%" (timestamp) absent))
-  (format nil "done"))
+;; (hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (absent)
+;;   (setf (hunchentoot:content-type*) "text/plain")
+;;   (with-open-file (stream (concatenate 'string path "attendance")
+;; 			  :direction :output
+;; 			  :if-exists :append
+;; 			  :if-does-not-exist :create)
+;;     (format stream "[~a]:~a~%" (timestamp) absent))
+;;   (format nil "done"))
 
-(defun attempt-login (user pass)
-  "Checks the credentials and returns the entry of fields as a
-list."
-  (let ((result))
-    (loop for cred in (cl-csv:read-csv #P"logins")
-	do (print (car cred))
-	do (print (cadr cred))
-	do (if (and (string= (cadr cred) pass) (string= (car cred) user))    
-	       (setf result cred)))
-    result))
+;; (defun attempt-login (user pass)
+;;   "Checks the credentials and returns the entry of fields as a
+;; list."
+;;   (let ((result))
+;;     (loop for cred in (cl-csv:read-csv #P"logins")
+;; 	do (print (car cred))
+;; 	do (print (cadr cred))
+;; 	do (if (and (string= (cadr cred) pass) (string= (car cred) user))    
+;; 	       (setf result cred)))
+;;     result))
 
-(hunchentoot:define-easy-handler (login :uri "/login") (user pass)
-  (setf (hunchentoot:content-type*) "text/plain")
-  (let ((credentials (attempt-login user pass)))
-    (if credentials
-	(format nil "{ \"status\": \"success\", \"isFaculty\": ~a, \"id\": \"~a\" }"
-		(if (caddr credentials) "true" "false")
-		(caddr credentials)) ;json format
-	(format nil "{ \"status\": \"failure\", \"isFaculty\": ~a, \"id\": \"\" }"
-		(if (caddr credentials) "true" "false")))))   ;json format
+;; (hunchentoot:define-easy-handler (login :uri "/login") (user pass)
+;;   (setf (hunchentoot:content-type*) "text/plain")
+;;   (let ((credentials (attempt-login user pass)))
+;;     (if credentials
+;; 	(format nil "{ \"status\": \"success\", \"isFaculty\": ~a, \"id\": \"~a\" }"
+;; 		(if (caddr credentials) "true" "false")
+;; 		(caddr credentials)) ;json format
+;; 	(format nil "{ \"status\": \"failure\", \"isFaculty\": ~a, \"id\": \"\" }"
+;; 		(if (caddr credentials) "true" "false")))))   ;json format
 
 
 (hunchentoot:define-easy-handler (get-schedule :uri "/getSchedule") (user pass scope)
