@@ -8,7 +8,8 @@ the PICT Attendance Tracker App.
 * Login Database
 
 The Hash string function takes a string and returns the string
-representation of the SHA256 hash of the input
+representation of the SHA256 hash of the input. This is used to hash
+passwords
 
 #+begin_src lisp
 (defun hash-string (string)
@@ -19,21 +20,132 @@ representation of the SHA256 hash of the input
 
 #+end_src
 
+#+RESULTS:
+: HASH-STRING
+
++ The ~*logins*~ variable store the data of all the students and teachers
+
+#+begin_src lisp
+(defparameter *logins* nil)
+(defparameter *current-login-UID* 0)
+
+(defun load-logins ()
+  "loads the data from the logins file"
+  (setf *logins* (cl-csv:read-csv #P"logins"))
+  (setf *current-login-UID* (length *logins*)))
+
+(defun assert-logins-loaded ()
+  "checks if the logins file has been loaded, if not then loads it"
+  (if (not *logins*)
+      (load-logins)))
+#+end_src
+
+#+RESULTS:
+: ASSERT-LOGINS-LOADED
+
+
+
 The ~add-login~ function takes a 
 
 #+begin_src lisp
 
 (defun add-login (user pass &key (faculty nil) (id nil))
   "hashes and stores the password in the login file"
-  (with-open-file (stream (concatenate 'string path "logins")
-			  :direction :output
-			  :if-exists :append
-			  :if-does-not-exist :create)
-    (let ((pass-hash (hash-string pass)))
-      (if faculty
-	  (format stream "~a,~a,~a~%" user pass-hash id)
-	  (format stream "~a,~a~%" user pass-hash)))))
+  
+  (let ((pass-hash (hash-string pass))
+	(is-faculty (if faculty "true" "false")))
+    
+    (assert-logins-loaded)
+    (nconc *logins* (list (list *current-login-UID* user pass-hash is-faculty id)))
+    (incf *current-login-UID*)
+    
+    (with-open-file (stream (concatenate 'string path "logins")
+			    :direction :output
+			    :if-exists :append
+			    :if-does-not-exist :create)
+      (format stream "~a,~a,~a,~a~%" user pass-hash is-faculty id))))
 #+end_src
+
+#+RESULTS:
+: ADD-LOGIN
+
++ The function ~attempt-login~ checks the ~logins~ file to see if
+  there is an entry corresponding to the input ~user~ and ~pass~
++ ~pass~ is of course the hash of the password, not the actual password
++ The ~logins~ file is a csv file, it is currently formatted like so
+  + Each entry has 3 parts, comma separated: ~<Name>, <Password-Hash>, <isFaculty>, <ID>~
+  + When parsed by ~cl-csv~, it returns a list of lists containing,
+    the entries for example are like this:
+    
+:     (("Student1" "skdjalskdjlefseifjlsdkjfslkdglskdjglsegilihlih" "false" "11011")  ; ID is roll no for student
+:      ("Student2" "lsdkfjslkdjflseifjlsieglfdhgkjfhdkuhrgugjvhsle" "false" "12021")
+:      ("Teacher1" "mioiukjrtkjfglifguldifjglsieruslidfjglsidkjufg" "true" "KDK")) ; ID is Abbreviation fir teachers
+
+#+begin_src lisp
+(defun attempt-login (user pass)
+  "Checks the credentials and returns the entry of fields as a
+list."
+  (assert-logins-loaded)
+  (let ((result))
+    (loop for cred in *logins*
+	do (if (and (string= (caddr cred) pass) (string= (cadr cred) user))    
+	       (setf result cred)))
+    result))
+#+end_src
+
+#+RESULTS:
+: ATTEMPT-LOGIN
+
+* Attendance Database
+
+This also works on the variable ~*logins*~, it handles the attendance
+data part of the dataset
+
+
+** Data Import
+
+These functions will import the data from the csv's generated from the
+data provided by the college.
+
++ Read the source csv
++ Create entry in the ~logins~ file with some default passwd (maybe their roll no)
++ Convert the attendance data into an alist
++ wrtie the alist to the ~attendance-data~ file
++ ensure that the UID in the ~logins~ and ~attendance-data~ matches
+
+#+begin_src lisp
+
+					;(defparameter *attendance-data* nil)
+
+(defun get-generic-password (entry)
+  "gets a generic but unique password for each entry (eg the roll no)"
+  (car entry))
+
+(defun import-student-data (filename subjects)
+  "imports the data from the college csv files"
+  (let ((raw-data (cl-csv:read-csv (pathname filename))))
+    (with-open-file (logins "logins" :direction :output
+				     :if-exists :append
+				     :if-does-not-exist :create)
+      (setf *attendance-data* (nconc *attendance-data* (loop for entry in raw-data
+							     do (format logins
+									"~a,~a,~a,~a~%"
+									(car entry)
+									(hash-string (get-generic-password entry))
+									(cadr entry)
+									,*current-login-UID*)
+							     collect (cons *current-login-UID*
+									   (loop for present in (cddr entry) by #'cddr
+										 for total in (cdddr entry) by #'cddr
+										 for subject in subjects
+										 collect `(,subject ("present" . ,present) ("total" . ,total))))
+							     do (incf *current-login-UID*)))))))
+
+#+end_src
+
+#+RESULTS:
+: IMPORT-STUDENT-DATA
+
 
 
 * Timetable Database
@@ -93,10 +205,10 @@ be output of function GET-TIMINGS"
 beginning which indicates the teachers name"
   (list (cons teacher-name data)))
 
-(defun query-timetable (keys timetable)
+(defun query-timetable (keys timetable &key (test #'string=))
   "Queries the TIMETABLE recursively by using KEYS"
   (if keys
-      (query-timetable (cdr keys) (cdr (assoc (car keys) timetable :test #'string=)))
+      (query-timetable (cdr keys) (cdr (assoc (car keys) timetable :test test)))
       timetable))
 
 (setf *timetable* (apply-teacher-name (apply-timings (transpose-and-label (strip-timings input)) (get-timings input)) "KDK"))

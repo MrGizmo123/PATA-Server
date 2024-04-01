@@ -4,27 +4,27 @@
 (ql:quickload :cl-csv)
 (ql:quickload :cl-json)
 
-(setf path "/home/liquidcat/proj/PATA-Server/")
+;; (setf path "/home/liquidcat/proj/PATA-Server/")
 
-(defconstant *day-names*
-           '("Monday" "Tuesday" "Wednesday"
-	         "Thursday" "Friday" "Saturday"
-	     "Sunday"))
+;; (defconstant *day-names*
+;;            '("Monday" "Tuesday" "Wednesday"
+;; 	         "Thursday" "Friday" "Saturday"
+;; 	     "Sunday"))
 
-(defun timestamp ()
-  "returns current timestamp according to the server"
-  (multiple-value-bind
-           (second minute hour day month year day-of-week dst-p tz)
-    	   (get-decoded-time)
-           (format nil "~2,'0d:~2,'0d:~2,'0d ~d/~2,'0d/~d"
-	    	 hour
-	    	 minute
-	    	 second
-	    	 day
-	    	 month
-	    	 year)))
+;; (defun timestamp ()
+;;   "returns current timestamp according to the server"
+;;   (multiple-value-bind
+;;            (second minute hour day month year day-of-week dst-p tz)
+;;     	   (get-decoded-time)
+;;            (format nil "~2,'0d:~2,'0d:~2,'0d ~d/~2,'0d/~d"
+;; 	    	 hour
+;; 	    	 minute
+;; 	    	 second
+;; 	    	 day
+;; 	    	 month
+;; 	    	 year)))
 
-(defvar *server* (make-instance 'hunchentoot:easy-acceptor :port 4242))
+;; (defvar *server* (make-instance 'hunchentoot:easy-acceptor :port 4242))
 
 ;; (hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (absent)
 ;;   (setf (hunchentoot:content-type*) "text/plain")
