@@ -115,26 +115,6 @@ server. For example,
 + The standard output ~(format nil <output>)~ of this function is then
   returned as the body of the response from the server.
   
-**** Upload Attendance
-This handles the upload attendance request.
-+ The http query parameter ~absent~ is a comma separated list of the
-+ It is bound to the path ~<server-addr>/uploadAttendance~
-+ Right now it simply writes the attendance to the file ~attendance~
-
-#+begin_src lisp
-(hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (absent)
-  (setf (hunchentoot:content-type*) "text/plain")
-  (with-open-file (stream (concatenate 'string path "attendance")
-			  :direction :output
-			  :if-exists :append
-			  :if-does-not-exist :create)
-    (format stream "[~a]:~a~%" (timestamp) absent))
-  (format nil "done"))
-#+end_src
-
-#+RESULTS:
-: SAY-YO
-
 **** Login
 This handles the login request
 
@@ -159,7 +139,7 @@ This handles the login request
   (setf (hunchentoot:content-type*) "text/plain")
   (let* ((credentials (attempt-login user pass))
 	 (status (if credentials "success" "failure"))
-	 (isFaculty (if (cadddr credentials) "true" "false"))
+	 (isFaculty (if (caddr credentials) "true" "false"))
 	 (id (caddddr credentials))
 	 (UID (car credentials)))
     (format nil (cl-json:encode-json-plist-to-string
@@ -168,6 +148,27 @@ This handles the login request
 
 #+RESULTS:
 : LOGIN
+
+**** Upload Attendance
+This handles the upload attendance request.
++ The http query parameter ~absent~ is a comma separated list of the
++ It is bound to the path ~<server-addr>/uploadAttendance~
++ Right now it simply writes the attendance to the file ~attendance~
+
+#+begin_src lisp
+(hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (user pass subject present)
+  (setf (hunchentoot:content-type*) "text/plain")
+  (let ((credentials (attempt-login user pass)))
+    (if (caddr credentials)
+	(loop for roll-number in (split-sequence:split-sequence #\, present)
+	      for student-data = (query (list roll-number subject) *attendance-data*)
+	      do (incf (cdar student-data))
+	      do (incf (cdadr student-data))))
+  (format nil "done")))
+#+end_src
+
+#+RESULTS:
+: SAY-YO
 
 **** Schedule Handler
 
@@ -204,8 +205,8 @@ This handles the ~getSchedule~ request
     (if (caddr credentials)		;only faculty will have id
 	(format nil
 		(cl-json:encode-json-alist-to-string
-		 (query-timetable (cons (caddr credentials) split-scope)
-				  ,*timetable*)))
+		 (query (cons (car credentials) split-scope)
+			*timetable*)))
 	(format nil "no schedule found"))))
 #+end_src
 
@@ -231,6 +232,25 @@ It takes parameters
   (if (attempt-login user pass)
       (let ((attendance (query (list user) *attendance-data*)))
 	(format nil "~a" (cl-json:encode-json-alist-to-string attendance)))))
+
+#+end_src
+
+
+**** Get Batch
+
+This handles the ~getBatch~ request
++ It queries the ~*batches*~ table
++ It returns the list of roll numbers associated with a certain batch
+
+#+begin_src lisp
+
+(hunchentoot:define-easy-handler (get-batch :uri "/getBatch") (batch)
+  (setf (hunchentoot:content-type*) "text/plain")
+  ;;(format *standard-output* batchName)
+  (format nil
+	  (cl-json:encode-json-alist-to-string
+	   (list (cons "members" (query (list batch)
+		  *batches*))))))
 
 #+end_src
 
@@ -362,7 +382,7 @@ data provided by the college.
 
 #+begin_src lisp
 
-; subject list for FE7-FE12 is: '("EM-2" "PHY" "BEE" "EM" "EG" "ES-2" "CS" "EM-2-Prac" "PHY-Prac" "BEE-Prac" "EM-Prac" "EG-Prac" "CAD-Prac" "PBL-Prac")
+					; subject list for FE7-FE12 is: '("EM-2" "PHY" "BEE" "EM" "EG" "ES-2" "CS" "EM-2-Prac" "PHY-Prac" "BEE-Prac" "EM-Prac" "EG-Prac" "CAD-Prac" "PBL-Prac")
 
 (defun get-generic-password (entry)
   "gets a generic but unique password for each entry (eg the roll no)"
@@ -380,7 +400,7 @@ data provided by the college.
 									   (loop for present in (cddr entry) by #'cddr ;no of lectures they were present
 										 for total in (cdddr entry) by #'cddr ;no of lectures they were absent
 										 for subject in subjects ;the subject which the above data is for
-										 collect `(,subject ("present" . ,present) ("total" . ,total)))) ;collect into alist
+										 collect `(,subject ("present" . ,(parse-integer present)) ("total" . ,(parse-integer total))))) ;collect into alist
 							     finally (save-server-state)))))))
 #+end_src
 
@@ -422,17 +442,67 @@ the file. Later this file can just be evaluated to get the value of
 #+RESULTS:
 : IMPORT-STUDENT-DATA
 
+*** Batches Database
+
+This is he part of the database which associates batch names with the
+roll numbers of the members of those batches.
++ It creates a variable called ~*batches*~
++ ~*batches*~ is an alist containing the associations
++ A single roll number may appear twice e.g. ~11018~ is in ~FE10~ as
+  well as ~A10~
++ It requires that the logins be loaded
+
+#+begin_src lisp
+
+(defvar *batches* nil)
+
+(defun add-to-batch (batch roll-number)
+  "Checks if BATCH already exists in *BATCHES*, if it does, then add the
+ROLL-NUMBER to it, else it creates an association with that key and
+adds the ROLL-NUMBER to it"
+  (let ((batch-data (assoc batch *batches* :test #'string=)))
+    (if batch-data
+        (if (not (member roll-number batch-data :test #'string=))
+            (setf (cdr batch-data) (cons roll-number (cdr batch-data))))
+        (setf *batches* (acons batch (list roll-number) *batches*))))
+  ,*batches*)
+
+(defun generate-batches ()
+  "generates an alist which associates batch names with the member roll
+numbers. It is possible that one roll number appears in 2 batches"
+  (assert-logins-loaded)
+  (setf *batches* nil)
+  (loop for element in (reverse *logins*)
+        if (not (caddr element))	; check if its a student
+          do (let* ((member (car element))
+		    (year-number (parse-integer (subseq member 0 1)))
+                    (class-number (subseq member 1 3))
+                    (roll-number (parse-integer (subseq member 3)))
+                    (year (cond ((= year-number 1) "FE")
+                                ((= year-number 2) "SE")
+                                ((= year-number 3) "TE")
+                                (t "BE")))
+                    (practical-batch-prefix (cond ((<= roll-number 25) "A")
+                                                  ((<= roll-number 50) "B")
+                                                  (t "C")))
+                    (theory-batch (concatenate 'string year class-number))
+                    (practical-batch (concatenate 'string practical-batch-prefix class-number)))
+               (add-to-batch theory-batch member)
+               (add-to-batch practical-batch member))))
+
+#+end_src
+
 
 *** Timetable Database
 
 #+name: KDK-timetable
-|  Time | Mon | Tue  | Wed  | Thu | Fri  | Sat |
-|  8:00 | A10 | FE11 | FE10 | FE3 | FE9  | FE2 |
-|  9:00 | A10 | FE12 | FE11 | FE4 | FE10 | FE3 |
-| 10:15 | FE3 | FE13 | FE12 | FE5 | FE11 | FE4 |
-| 11:15 | FE4 | FE1  | FE13 | FE6 | FE12 | FE5 |
-| 13:00 | FE5 | FE2  | FE1  | FE7 | FE13 | FE6 |
-| 14:00 | FE6 | FE3  | FE2  | FE8 | FE1  | FE7 |
+|  Time | Mon | Tue  | Wed  | Thu | Fri  | Sat | Sun            |
+|  8:00 | A10 | FE11 | FE10 | FE3 | FE9  | FE2 | A10 : PHY-Prac |
+|  9:00 | A10 | FE12 | FE11 | FE4 | FE10 | FE3 | B10 : EM       |
+| 10:15 | FE3 | FE13 | FE12 | FE5 | FE11 | FE4 | C10 : EM-2     |
+| 11:15 | FE4 | FE1  | FE13 | FE6 | FE12 | FE5 | FE10: PHY      |
+| 13:00 | FE5 | FE2  | FE1  | FE7 | FE13 | FE6 | FE12: ES-2     |
+| 14:00 | FE6 | FE3  | FE2  | FE8 | FE1  | FE7 | FE13: PHY      |
 
 #+begin_src lisp :var input=KDK-timetable :results verbatim
 (ql:quickload :cl-json)
@@ -486,6 +556,6 @@ beginning which indicates the teachers name"
       (query (cdr keys) (cdr (assoc (car keys) table :test test)))
       table))
 
-;(setf *timetable* (apply-teacher-name (apply-timings (transpose-and-label (strip-timings input)) (get-timings input)) "KDK"))
+(setf *timetable* (apply-teacher-name (apply-timings (transpose-and-label (strip-timings input)) (get-timings input)) "KDK"))
 
 #+end_src
