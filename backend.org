@@ -156,7 +156,7 @@ This handles the upload attendance request.
 + Right now it simply writes the attendance to the file ~attendance~
 
 #+begin_src lisp
-(hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (user pass subject present)
+(hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (user pass subject batch present)
   (setf (hunchentoot:content-type*) "text/plain")
   (let ((credentials (attempt-login user pass)))
     (if (caddr credentials)
@@ -442,6 +442,31 @@ the file. Later this file can just be evaluated to get the value of
 #+RESULTS:
 : IMPORT-STUDENT-DATA
 
+*** Teacher Wise Attendance Database
+
+This is the part which holds the attendance data associated with each
+teacher
+
++ This is an alist of alists, it can be queried using the funcion
+  ~query~
++ This associates each teacher with an alist
++ That alist associates each batch under the teacher to an alist
++ That alist associates Subjects to an alist
++ That alist associates dates with the roll number who were present at
+  that date for that subject
+  
+#+begin_src lisp
+
+(defvar *teacher-attendance* nil)
+
+(defun add-entry-to-teacher-attendance (teacher batch subject date-string present-nos)
+  "adds an entry in the *teacher-attendance* database"
+  (let ((entries (query-cell (list teacher batch subject) *teacher-attendance*)))
+    (setf (cdar entries) (cons (cons date-string present-nos) (cdar entries)))))
+
+#+end_src
+
+
 *** Batches Database
 
 This is he part of the database which associates batch names with the
@@ -554,6 +579,12 @@ beginning which indicates the teachers name"
   "Queries the TABLE recursively by using KEYS"
   (if keys
       (query (cdr keys) (cdr (assoc (car keys) table :test test)))
+      table))
+
+(defun query-cell (keys table &key (test #'string=))
+  "Queries the TABLE recursively by using KEYS"
+  (if (> (length keys) 1)
+      (query-cell (cdr keys) (cdr (assoc (car keys) table :test test)))
       table))
 
 (setf *timetable* (apply-teacher-name (apply-timings (transpose-and-label (strip-timings input)) (get-timings input)) "KDK"))
