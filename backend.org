@@ -67,6 +67,16 @@ is placed on the attendance sheets
 	    month
 	    year)))
 
+(defun get-date-string ()
+  "returns current datestring according to the server e.g. 12/03/2024 "
+  (multiple-value-bind
+        (second minute hour day month year day-of-week dst-p tz)
+      (get-decoded-time)
+    (format nil "~d/~2,'0d/~d"
+	    day
+	    month
+	    year)))
+
 #+end_src
 
 #+RESULTS:
@@ -86,7 +96,7 @@ Creates a Hunchentoot Server.
 
 (defun stop-server ()
   "stops the server"
-  (hunchentoot:stop *server*))
+ (hunchentoot:stop *server*))
 
 (defun restart-server ()
   "restarts the server"
@@ -114,7 +124,67 @@ server. For example,
   Like so ~(login "abcd" "1234")~
 + The standard output ~(format nil <output>)~ of this function is then
   returned as the body of the response from the server.
-  
+
+**** Download Attendance
+
+This handles the download attendance request.
+
++ It takes the teacher
++ the password hash
++ the batch
++ The subject
+
+It returns a downloadable csv file containing the required data
+
+#+begin_src lisp
+(hunchentoot:define-easy-handler (download-attendance :uri "/downloadAttendance") (user pass batch subject)
+  (setf (hunchentoot:content-type*) "text/csv")
+  (let ((credentials (attempt-login user pass)))
+    (if (caddr credentials)		;check if is teacher
+	(format nil (cl-csv:write-csv (get-attendance-sheet user batch subject))))))
+
+(defun get-attendance-sheet (teacher batch subject)
+  "generates an attendance sheet ready for conversion into a csv from the
+,*teacher-attendance* table"
+  (let ((data (query (list teacher batch subject) *teacher-attendance*))
+	      (batch-members (query (list batch) *batches*)))
+	  (cons (cons "Roll No." (loop for entry in data collect (car entry)))
+		  (loop for batch-member in batch-members
+			collect (cons batch-member
+				      (loop for entry in (reverse data)
+					    do (print entry)
+					    collect (if (member batch-member entry :test #'string=)
+							"P"
+							"A")))))))
+#+end_src
+
+**** Download Attendance Options
+
+This handles the download attendance options request.
+
++ It takes the teacher
++ the password hash
+
+It returns a tree containing the batches and subjects for which
+attendance is stored in the table ~*teacher-attendance*~
+
+#+begin_src lisp
+(hunchentoot:define-easy-handler (download-attendance-options :uri "/getDownloadAttendanceOptions") (user pass)
+  (setf (hunchentoot:content-type*) "text/plain")
+  (let ((credentials (attempt-login user pass)))
+    (if (caddr credentials)		;check if is teacher
+	(format nil (cl-json:encode-json-alist-to-string (get-attendance-options user))))))
+
+(defun get-attendance-options (teacher)
+  "generates an alist containing the options for all the batches an
+subjects for the given teacher"
+  (let ((data (query (list teacher) *teacher-attendance*)))
+    (loop for batch-data in data
+	  collect (cons (car batch-data) (loop for subject-data in (cdr batch-data)
+					       collect (car subject-data))))))
+#+end_src
+
+
 **** Login
 This handles the login request
 
@@ -158,10 +228,13 @@ This handles the upload attendance request.
 #+begin_src lisp
 (hunchentoot:define-easy-handler (say-yo :uri "/uploadAttendance") (user pass subject batch present)
   (setf (hunchentoot:content-type*) "text/plain")
-  (let ((credentials (attempt-login user pass)))
+  (let ((credentials (attempt-login user pass))
+	(roll-nos (split-sequence:split-sequence #\, present))
+	(date-string (get-date-string)))
     (if (caddr credentials)
-	(loop for roll-number in (split-sequence:split-sequence #\, present)
-	      for student-data = (query (list roll-number subject) *attendance-data*)
+	(add-entry-to-teacher-attendance user batch subject date-string roll-nos)
+	(loop for roll-number in int-roll-nos
+	      for student-data = (query (list roll-no subject) *attendance-data*)
 	      do (incf (cdar student-data))
 	      do (incf (cdadr student-data))))
   (format nil "done")))
@@ -322,10 +395,10 @@ The ~add-login~ function takes
 + optionally if it should immediately update the ~logins~ file (default true)
 
 #+begin_src lisp
-(defun add-login (user pass &key (faculty nil) (save-logins t))
+(defun add-login (user pass &key (faculty nil) (save-logins t) (load-logins nil))
   "hashes and stores the password in the login file"
   (let ((pass-hash (hash-string pass)))
-    (assert-logins-loaded)
+    (if load-logins (assert-logins-loaded))
     (setf *logins* (nconc *logins* (list (list user pass-hash faculty))))
     (if save-logins (save-login-data))))
 #+end_src
@@ -390,18 +463,20 @@ data provided by the college.
 
 (defun import-student-data (filename subjects)
   "imports the data from the college csv files"
+  (setf *logins* nil)
+  (setf *attendance-data* nil)
   (let ((raw-data (cl-csv:read-csv (pathname filename))))
-    (with-open-file (logins "logins" :direction :output
-				     :if-exists :append
-				     :if-does-not-exist :create)
+    
+    
       (setf *attendance-data* (nconc *attendance-data* (loop for entry in raw-data
-							     do (add-login (car entry) (get-generic-password entry) :faculty nil :save-logins nil)
+							     do (add-login (car entry) (get-generic-password entry) :faculty nil :save-logins nil :load-logins nil)
 							     collect (cons (car entry)
 									   (loop for present in (cddr entry) by #'cddr ;no of lectures they were present
 										 for total in (cdddr entry) by #'cddr ;no of lectures they were absent
 										 for subject in subjects ;the subject which the above data is for
 										 collect `(,subject ("present" . ,(parse-integer present)) ("total" . ,(parse-integer total))))) ;collect into alist
-							     finally (save-server-state)))))))
+							     finally (save-server-state))))
+    (print (length raw-data))))
 #+end_src
 
 **** Loading Server Data
@@ -462,7 +537,7 @@ teacher
 (defun add-entry-to-teacher-attendance (teacher batch subject date-string present-nos)
   "adds an entry in the *teacher-attendance* database"
   (let ((entries (query-cell (list teacher batch subject) *teacher-attendance*)))
-    (setf (cdar entries) (cons (cons date-string present-nos) (cdar entries)))))
+    (setf (cdr entries) (cons (cons date-string present-nos) (cdr entries)))))
 
 #+end_src
 
@@ -487,7 +562,7 @@ ROLL-NUMBER to it, else it creates an association with that key and
 adds the ROLL-NUMBER to it"
   (let ((batch-data (assoc batch *batches* :test #'string=)))
     (if batch-data
-        (if (not (member roll-number batch-data :test #'string=))
+        (if (not (member roll-number batch-data))
             (setf (cdr batch-data) (cons roll-number (cdr batch-data))))
         (setf *batches* (acons batch (list roll-number) *batches*))))
   ,*batches*)
@@ -521,13 +596,13 @@ numbers. It is possible that one roll number appears in 2 batches"
 *** Timetable Database
 
 #+name: KDK-timetable
-|  Time | Mon | Tue  | Wed  | Thu | Fri  | Sat | Sun            |
-|  8:00 | A10 | FE11 | FE10 | FE3 | FE9  | FE2 | A10 : PHY-Prac |
-|  9:00 | A10 | FE12 | FE11 | FE4 | FE10 | FE3 | B10 : EM       |
-| 10:15 | FE3 | FE13 | FE12 | FE5 | FE11 | FE4 | C10 : EM-2     |
-| 11:15 | FE4 | FE1  | FE13 | FE6 | FE12 | FE5 | FE10: PHY      |
-| 13:00 | FE5 | FE2  | FE1  | FE7 | FE13 | FE6 | FE12: ES-2     |
-| 14:00 | FE6 | FE3  | FE2  | FE8 | FE1  | FE7 | FE13: PHY      |
+|  Time | Mon | Tue  | Wed  | Thu | Fri             | Sat | Sun            |
+|  8:00 | A10 | FE11 | FE10 | FE3 | A9 : PHY-Prac   | FE2 | A10 : PHY-Prac |
+|  9:00 | A10 | FE12 | FE11 | FE4 | C10 : PHY-Prac  | FE3 | B10 : EM       |
+| 10:15 | FE3 | FE13 | FE12 | FE5 | FE10 : PHY      | FE4 | C10 : EM-2     |
+| 11:15 | FE4 | FE1  | FE13 | FE6 | FE12 : PHY      | FE5 | FE10: PHY      |
+| 13:00 | FE5 | FE2  | FE1  | FE7 | FE13 : PHY-Prac | FE6 | FE12: ES-2     |
+| 14:00 | FE6 | FE3  | FE2  | FE8 | FE1 : PHY-Prac  | FE7 | FE13: PHY      |
 
 #+begin_src lisp :var input=KDK-timetable :results verbatim
 (ql:quickload :cl-json)
@@ -585,7 +660,7 @@ beginning which indicates the teachers name"
   "Queries the TABLE recursively by using KEYS"
   (if (> (length keys) 1)
       (query-cell (cdr keys) (cdr (assoc (car keys) table :test test)))
-      table))
+      (assoc (car keys) table :test test)))
 
 (setf *timetable* (apply-teacher-name (apply-timings (transpose-and-label (strip-timings input)) (get-timings input)) "KDK"))
 
